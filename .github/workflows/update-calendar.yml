@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: "3.x"
       - name: Fetch official KPL schedule and write ICS
-        run: python update_calendar.py --season-id KPL2026S2 --output kpl-summer-playoffs.ics
+        run: python update_calendar.py --output kpl-summer-playoffs.ics
       - name: Commit changed calendar
         run: |
           git config user.name "github-actions[bot]"
