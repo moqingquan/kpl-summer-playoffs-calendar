@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate an iOS-compatible ICS feed for the KPL summer playoffs.
+"""Generate an iOS-compatible ICS feed for the current KPL season.
 
 The source is the public schedule endpoint used by the official KPL website.
 The same UID is kept for each schedule item, so calendar clients update an
@@ -22,7 +22,6 @@ API_BASE = "https://kplshop-op.timi-esports.qq.com/kplow"
 SEASONS_URL = f"{API_BASE}/getSeasonAndStageAndTeamList"
 SCHEDULE_URL = f"{API_BASE}/getScheduleList"
 KPL_SCHEDULE_URL = "https://kpl.qq.com/#/Schedule"
-DEFAULT_SEASON_ID = "KPL2026S2"
 DEFAULT_OUTPUT = Path(__file__).with_name("kpl-summer-playoffs.ics")
 BEIJING = timezone(timedelta(hours=8))
 
@@ -47,30 +46,52 @@ def post_json(url: str, payload: dict) -> dict:
     return data
 
 
-def resolve_season_id(requested: str) -> tuple[str, str]:
+def resolve_season_id(requested: str | None) -> tuple[str, str]:
     if requested:
         return requested, requested
     data = post_json(SEASONS_URL, {"seasonid": ""}).get("data", {})
-    for season in data.get("seasons", []):
-        name = str(season.get("season_name", ""))
-        if season.get("is_cur_season") and "夏季赛" in name:
-            return str(season["seasonid"]), name
-    raise RuntimeError("未能从KPL官网找到当前夏季赛")
+    seasons = data.get("seasons", [])
+    if not seasons:
+        raise RuntimeError("未能从KPL官网找到可用赛季")
+
+    # The official site marks the active season. This means the feed follows
+    # the next spring/summer/annual season without a code change.
+    current = next(
+        (season for season in seasons if str(season.get("is_cur_season")) == "1"),
+        None,
+    )
+    if current is None:
+        now = int(datetime.now(timezone.utc).timestamp())
+        active = [
+            season
+            for season in seasons
+            if int(season.get("start_time", 0) or 0)
+            <= now
+            <= int(season.get("end_time", 0) or 0)
+        ]
+        current = max(active or seasons, key=lambda season: int(season.get("start_time", 0) or 0))
+
+    return str(current["seasonid"]), str(current.get("season_name") or current["seasonid"])
 
 
-def fetch_playoff_matches(season_id: str) -> list[dict]:
+def fetch_matches(season_id: str) -> list[dict]:
     data = post_json(
         SCHEDULE_URL,
         {"seasonid": season_id, "stageid": "", "team_id": ""},
     ).get("data", {})
-    matches = [
-        item
-        for item in data.get("list", [])
-        if item.get("stageid") == "jhs"
-    ]
+    matches = []
+    for item in data.get("list", []):
+        if not item.get("scheduleid"):
+            continue
+        try:
+            if int(item.get("start_timestamp", 0)) <= 0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        matches.append(item)
     if not matches:
-        raise RuntimeError(f"官网没有返回 {season_id} 的季后赛场次")
-    return sorted(matches, key=lambda item: int(item.get("start_timestamp", 0)))
+        raise RuntimeError(f"官网没有返回 {season_id} 的赛程")
+    return sorted(matches, key=lambda item: int(item["start_timestamp"]))
 
 
 def ics_escape(value: object) -> str:
@@ -109,7 +130,18 @@ def ical_datetime(timestamp: object) -> datetime:
 
 
 def status_label(status: object) -> str:
-    return {1: "未开始", 2: "已取消", 3: "进行中", 4: "已结束"}.get(int(status), "未知")
+    try:
+        code = int(status)
+    except (TypeError, ValueError):
+        code = 1
+    return {1: "未开始", 2: "已取消", 3: "进行中", 4: "已结束"}.get(code, "未知")
+
+
+def status_code(status: object) -> int:
+    try:
+        return int(status)
+    except (TypeError, ValueError):
+        return 1
 
 
 def team_name(item: dict, side: str) -> str:
@@ -117,19 +149,26 @@ def team_name(item: dict, side: str) -> str:
     return name if name and name not in {"-", "暂无"} else "待定"
 
 
+def stage_name(item: dict) -> str:
+    return str(item.get("stage_name") or item.get("stageid") or "KPL赛程").strip()
+
+
 def make_description(item: dict, season_name: str) -> str:
-    status = status_label(item.get("schedule_status", 1))
+    current_status = status_code(item.get("schedule_status", 1))
+    status = status_label(current_status)
     score_a = item.get("team_a_score", 0)
     score_b = item.get("team_b_score", 0)
     location = item.get("location_name") or "待定"
-    fmt = item.get("competition_format") or "季后赛"
+    fmt = item.get("competition_format") or (
+        f"BO{item['bo_total']}" if item.get("bo_total") else "待定"
+    )
     return "\n".join(
         [
             season_name,
-            f"阶段：{item.get('stage_name') or '季后赛'}",
+            f"阶段：{stage_name(item)}",
             f"赛制：{fmt}",
             f"状态：{status}",
-            f"比分：{score_a} : {score_b}" if int(item.get("schedule_status", 1)) != 1 else "比分：未开始",
+            f"比分：{score_a} : {score_b}" if current_status != 1 else "比分：未开始",
             f"场馆/城市：{location}",
             "本日历由KPL官网公开赛程自动更新；对阵中的“待定”会在赛果确认后替换。",
             f"官网：{KPL_SCHEDULE_URL}",
@@ -145,11 +184,11 @@ def generate_ics(matches: list[dict], season_name: str) -> str:
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        "PRODID:-//KPL Calendar//KPL Summer Playoffs//CN",
+        "PRODID:-//KPL Calendar//KPL Schedule//CN",
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
-        "X-WR-CALNAME:KPL夏季赛季后赛",
-        "X-WR-CALDESC:KPL夏季赛季后赛动态赛程（每日更新）",
+        f"X-WR-CALNAME:{ics_escape(season_name)}｜KPL完整赛程",
+        f"X-WR-CALDESC:{ics_escape(season_name)}全部阶段动态赛程（每日更新）",
         "X-WR-TIMEZONE:Asia/Shanghai",
     ]
     for item in matches:
@@ -158,7 +197,7 @@ def generate_ics(matches: list[dict], season_name: str) -> str:
         a_name = team_name(item, "a")
         b_name = team_name(item, "b")
         schedule_id = str(item["scheduleid"])
-        current_status = int(item.get("schedule_status", 1))
+        current_status = status_code(item.get("schedule_status", 1))
         lines.extend(
             [
                 "BEGIN:VEVENT",
@@ -167,7 +206,7 @@ def generate_ics(matches: list[dict], season_name: str) -> str:
                 f"SEQUENCE:{sequence}",
                 f"DTSTART:{start.strftime('%Y%m%dT%H%M%SZ')}",
                 f"DTEND:{end.strftime('%Y%m%dT%H%M%SZ')}",
-                f"SUMMARY:{ics_escape('KPL季后赛｜' + a_name + ' vs ' + b_name)}",
+                f"SUMMARY:{ics_escape('KPL｜' + a_name + ' vs ' + b_name)}",
                 f"DESCRIPTION:{ics_escape(make_description(item, season_name))}",
                 f"LOCATION:{ics_escape(item.get('location_name') or '待定')}",
                 f"STATUS:{'CANCELLED' if current_status == 2 else 'CONFIRMED'}",
@@ -187,17 +226,21 @@ def write_calendar(output: Path, content: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="更新KPL夏季赛季后赛iOS日历订阅文件")
-    parser.add_argument("--season-id", default=DEFAULT_SEASON_ID, help="KPL赛季ID，默认KPL2026S2")
+    parser = argparse.ArgumentParser(description="更新当前KPL赛季全部阶段的iOS日历订阅文件")
+    parser.add_argument(
+        "--season-id",
+        default="",
+        help="KPL赛季ID；留空则自动跟随官网当前赛季",
+    )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="输出ICS路径")
     args = parser.parse_args()
     try:
         season_id, season_name = resolve_season_id(args.season_id)
-        matches = fetch_playoff_matches(season_id)
+        matches = fetch_matches(season_id)
         content = generate_ics(matches, season_name)
         write_calendar(args.output, content)
         print(f"已更新: {args.output}")
-        print(f"赛季: {season_name} ({season_id}); 季后赛场次: {len(matches)}")
+        print(f"赛季: {season_name} ({season_id}); 全部赛程: {len(matches)} 场")
         return 0
     except (HTTPError, URLError, TimeoutError, ValueError, RuntimeError, OSError, KeyError) as exc:
         print(f"更新失败: {exc}", file=sys.stderr)
