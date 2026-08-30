@@ -1,0 +1,29 @@
+name: Update KPL calendar
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 00:00 China Standard Time = 16:00 UTC on the previous day.
+    - cron: "0 16 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Fetch official KPL schedule and write ICS
+        run: python update_calendar.py --season-id KPL2026S2 --output kpl-summer-playoffs.ics
+      - name: Commit changed calendar
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kpl-summer-playoffs.ics
+          git diff --cached --quiet || git commit -m "chore: update KPL calendar"
+          git push
+
