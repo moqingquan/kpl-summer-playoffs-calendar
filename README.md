@@ -50,10 +50,15 @@ powershell -ExecutionPolicy Bypass -File .\install_task.ps1
 
 GitHub 的定时任务可能因平台排队延迟几分钟；若必须严格在本机 00:00 更新，请使用 Windows 任务计划程序方案。
 
+本仓库已经部署好的公网订阅地址：
+
+`https://moqingquan.github.io/kpl-summer-playoffs-calendar/kpl-summer-playoffs.ics`
+
+在 iPhone 中请使用“添加订阅日历”添加上面的地址，不要选择“导入文件”；否则只能得到一次性快照。
+
 ## 数据来源与边界
 
 - 数据源：KPL 官网赛程页使用的公开接口，官网页面为 <https://kpl.qq.com/#/Schedule>。
 - 接口返回的“待定”队伍会在官方赛果确认后变为真实队伍；程序不会根据传闻或自行推测结果。
 - 比赛结束时间按开始时间后 4 小时估算，日历主要用于提醒开赛；官方时间如有调整，以官网为准。
 - 如果官方临时改期，下一次更新会同时修改事件的开始时间。
-
