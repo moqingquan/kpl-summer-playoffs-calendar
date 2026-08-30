@@ -1,12 +1,18 @@
-# KPL 夏季赛季后赛 iOS 日历订阅
+# KPL 全赛季 iOS 日历订阅
 
-这个小项目从 KPL 官网使用的公开赛程接口读取季后赛数据，生成 `kpl-summer-playoffs.ics`。每场比赛使用固定 UID，因此“待定”对阵、比分和状态变化时，iOS 会更新原事件，不会重复创建一场新比赛。
+这个项目从 KPL 官网公开接口读取当前赛季的全部赛程，生成 `kpl-summer-playoffs.ics`。每场比赛使用固定 UID，因此“待定”对阵、比分、状态或时间变化时，iOS 会更新原事件，不会重复创建新比赛。
 
-当前默认目标是 2026 年 KPL 夏季赛（`KPL2026S2`）季后赛，包含 8 月 27 日至 9 月 6 日的季后赛阶段；9 月 12 日夏决不在这个订阅中。
+程序会自动读取官网标记的当前赛季，不再硬编码某个夏季赛或只筛选季后赛。当前赛季结束后，官网切换到春季赛、夏季赛或年度总决赛时，订阅会自动跟随新赛季。
 
 ## 立即生成一次
 
 在本目录打开 PowerShell：
+
+```powershell
+python .\update_calendar.py --output .\kpl-summer-playoffs.ics
+```
+
+如需查看历史赛季，可临时指定赛季 ID，例如：
 
 ```powershell
 python .\update_calendar.py --season-id KPL2026S2 --output .\kpl-summer-playoffs.ics
@@ -46,9 +52,9 @@ powershell -ExecutionPolicy Bypass -File .\install_task.ps1
 
 ### 长期、跨网络使用（推荐）
 
-把本目录内容放入一个你自己的 GitHub 仓库并启用 Actions。工作流会按北京时间每天 00:00（GitHub 的 `16:00 UTC`）抓取官网数据并提交新的 ICS。然后在 iPhone 订阅仓库中的 `kpl-summer-playoffs.ics` 的 Raw 地址，或使用 GitHub Pages 提供该文件。
+GitHub Actions 会按北京时间每天 00:00（GitHub 的 `16:00 UTC`）抓取官网当前赛季的全部阶段并提交新的 ICS。日历文件变化后，GitHub Pages 会自动重新发布。
 
-GitHub 的定时任务可能因平台排队延迟几分钟；若必须严格在本机 00:00 更新，请使用 Windows 任务计划程序方案。
+GitHub 的定时任务可能因平台排队延迟几分钟，iOS 也会按系统的订阅刷新策略获取更新；如果需要立即检查，可在仓库 Actions 页面手动运行 `Update KPL calendar`。
 
 本仓库已经部署好的公网订阅地址：
 
@@ -62,3 +68,4 @@ GitHub 的定时任务可能因平台排队延迟几分钟；若必须严格在�
 - 接口返回的“待定”队伍会在官方赛果确认后变为真实队伍；程序不会根据传闻或自行推测结果。
 - 比赛结束时间按开始时间后 4 小时估算，日历主要用于提醒开赛；官方时间如有调整，以官网为准。
 - 如果官方临时改期，下一次更新会同时修改事件的开始时间。
+
