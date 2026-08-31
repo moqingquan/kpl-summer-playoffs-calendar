@@ -1,6 +1,11 @@
 name: Publish KPL calendar to GitHub Pages
 
 on:
+  # A workflow-token push does not trigger another push workflow. Listen for
+  # the updater workflow explicitly so every generated ICS is published.
+  workflow_run:
+    workflows: ["Update KPL calendar"]
+    types: [completed]
   push:
     branches: [main]
     paths:
@@ -19,12 +24,15 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/configure-pages@v5
         with:
           enablement: true
@@ -34,4 +42,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
